@@ -5,3 +5,6 @@ _pycache__
 # IntelliJ/Jupyter
 .idea
 .ipynb_checkpoints
+
+pl_experiments
+sub_modules/semantic

@@ -9,6 +9,8 @@ class TransformerLMDecoderConfig(ModelConfiguration):
     def __init__(self,
                  lm_encoder,  #: Union[TransformerLMEncoder, TransformerLMEncoderConfig],
                  sos_id: int,
+                 rank1=False,
+                 pointer_rank1=False,
                  unk_id=0,
                  n_layers=1,
                  decoder_dropout=0,
@@ -62,3 +64,5 @@ class TransformerLMDecoderConfig(ModelConfiguration):
         assert not (
                     use_pointer_query_self_attention and use_pointer_query_linear), "Cannot set both query linear and query self attention"
         self.target_vocab_size = target_vocab_size
+        self.rank1 = rank1
+        self.pointer_rank1 = pointer_rank1

@@ -1,0 +1,106 @@
+{
+    "data_setup": {
+        "chunk_size": 32,
+        "filter_language": null,
+        "language": "python,javascript,ruby,go",
+        "mask_all_tokens": false,
+        "num_sub_tokens": 5,
+        "num_subtokens_output": 6,
+        "shuffle": false,
+        "sort_by_length": false,
+        "use_no_punctuation": true,
+        "use_only_ast": false,
+        "use_pointer_network": true,
+        "use_validation": true
+    },
+    "data_transforms": {
+        "distance_binning": {
+            "growth_factor": 1.3,
+            "n_fixed_bins": 9,
+            "type": "exponential"
+        },
+        "max_distance_mask": null,
+        "relative_distances": [
+            "ppr",
+            "ancestor_sp",
+            "sibling_sp",
+            "shortest_paths"
+        ]
+    },
+    "model": {
+        "label_smoothing": 0.1,
+        "lm_decoder": {
+            "attend_cls_token": false,
+            "concat_query_and_pointer": true,
+            "decoder_activation": "gelu",
+            "decoder_dim_feedforward": 2048,
+            "decoder_dropout": 0,
+            "decoder_nhead": 8,
+            "n_layers": 1,
+            "output_nonlinearity": null,
+            "pointer_attention_type": "additive",
+            "use_pointer_query_linear": false,
+            "use_pointer_query_self_attention": false,
+            "use_teacher_forcing": true,
+            "rank1": true,
+            "pointer_rank1": true
+        },
+        "lm_encoder": {
+            "input_nonlinearity": "tanh",
+            "num_languages": 4,
+            "transformer": {
+                "encoder_layer": {
+                    "activation": "gelu",
+                    "d_model": 1024,
+                    "dim_feedforward": 2048,
+                    "dropout": 0.2,
+                    "nhead": 8,
+                    "use_content_content": true,
+                    "use_content_pos": true,
+                    "use_pos_content": true,
+                    "use_pos_pos": true,
+                    "use_token_distances": true,
+                    "rank1": true
+                },
+                "num_layers": 3
+            }
+        },
+        "with_cuda": true
+    },
+    "optimizer": {
+        "learning_rate": 8e-05,
+        "optimizer": "Adam",
+        "reg_scale": 3e-05
+    },
+    "training": {
+        "accumulate_tokens_batch": false,
+        "batch_size": 8,
+        "early_stopping_patience": 20,
+        "max_validation_samples": 50000,
+        "metrics": [
+            "top1_accuracy",
+            "top5_accuracy",
+            "non_trivial_accuracy",
+            "precision",
+            "recall",
+            "f1_score",
+            "micro_f1_score",
+            "rouge_2",
+            "rouge_l"
+        ],
+        "persistent_snapshot_every": 10000,
+        "random_seed": 456,
+        "simulated_batch_size": 128,
+        "simulated_batch_size_valid": 1280,
+        "validate_every": 100
+    },
+    "transfer_learning": {
+        "cpu": false,
+        "freeze_encoder_layers": null,
+        "model_type": "ct_code_summarization",
+        "run_id": "CT-23",
+        "snapshot_iteration": 10,
+        "use_pretrained_model": false
+    },
+    "seed": 309301796
+}

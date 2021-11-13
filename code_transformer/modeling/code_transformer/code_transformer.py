@@ -35,7 +35,7 @@ class CodeTransformerLayer(TransformerEncoderLayer):
 
     def __init__(self, d_model, nhead, dim_feedforward=2048, dropout=0.1, activation="relu",
                  num_relative_distances=1, use_token_distances=False, use_edge_embeddings=False,
-                 use_content_content=True, use_content_pos=True,
+                 use_content_content=True, use_content_pos=True, rank1=False,
                  use_pos_content=True, use_pos_pos=True, **kwargs):
 
         super(CodeTransformerLayer, self).__init__(d_model, nhead, dim_feedforward, dropout,
@@ -50,11 +50,41 @@ class CodeTransformerLayer(TransformerEncoderLayer):
                                                     use_pos_content=use_pos_content,
                                                     use_pos_pos=use_pos_pos,
                                                     dropout=dropout)
+        
+        self.rank1 = rank1 
+        if self.rank1:
+            num_languages = 4
+            self.alpha = nn.Parameter(torch.FloatTensor(num_languages, d_model))
+            self.gamma = nn.Parameter(torch.FloatTensor(num_languages, 3 * d_model))
+
+            self.linear1_alpha = nn.Parameter(torch.FloatTensor(num_languages, d_model))
+            self.linear1_gamma = nn.Parameter(torch.FloatTensor(num_languages, dim_feedforward))
+            self.linear2_alpha = nn.Parameter(torch.FloatTensor(num_languages, dim_feedforward))
+            self.linear2_gamma = nn.Parameter(torch.FloatTensor(num_languages, d_model))
 
     def _reset_parameters(self):
+        if self.rank1:
+            # TODO: reset rank1 parameters.
+            nn.init.constant_(self.alpha, 1.)
+            nn.init.constant_(self.gamma, 1.)
+            nn.init.constant_(self.linear1_alpha, 1.)
+            nn.init.constant_(self.linear1_gamma, 1.)
+            nn.init.constant_(self.linear2_alpha, 1.)
+            nn.init.constant_(self.linear2_gamma, 1.)
+
+            #nn.init.normal_(self.alpha, mean=1., std=0.5)
+            #nn.init.normal_(self.gamma, mean=1., std=0.5) 
+            #nn.init.normal_(self.linear1_alpha, mean=1., std=0.5)
+            #nn.init.normal_(self.linear1_gamma, mean=1., std=0.5)
+            #nn.init.normal_(self.linear2_alpha, mean=1., std=0.5)
+            #nn.init.normal_(self.linear2_gamma, mean=1., std=0.5)
         self.self_attn._reset_parameters()
 
-    def post_attention(self, src: torch.Tensor, src2: torch.Tensor):
+    def post_attention(
+        self,
+        src: torch.Tensor, 
+        src2: torch.Tensor,
+        languages: Optional[torch.Tensor]=None):
         """
         Feed-forward layer after the attention computations.
 
@@ -71,7 +101,20 @@ class CodeTransformerLayer(TransformerEncoderLayer):
 
         src = src + self.dropout1(src2)
         src = self.norm1(src)
-        src2 = self.linear2(self.dropout(self.activation(self.linear1(src))))
+        if self.rank1:
+            # TODO: ignore bias for now.
+            alpha = torch.index_select(self.linear1_alpha, 0, languages).unsqueeze(0)
+            gamma = torch.index_select(self.linear1_gamma, 0, languages).unsqueeze(0)
+            perturb_src = src * alpha
+            linear1_output = self.linear1(perturb_src) * gamma
+
+            linear2_input = self.dropout(self.activation(linear1_output))
+            alpha = torch.index_select(self.linear2_alpha, 0, languages).unsqueeze(0)
+            gamma = torch.index_select(self.linear2_gamma, 0, languages).unsqueeze(0)
+            perturb_linear2_input = linear2_input * alpha
+            src2 = self.linear2(perturb_linear2_input) * gamma
+        else:
+            src2 = self.linear2(self.dropout(self.activation(self.linear1(src))))
         src = src + self.dropout2(src2)
         src = self.norm2(src)
         return src
@@ -86,7 +129,7 @@ class CodeTransformerLayer(TransformerEncoderLayer):
                 edge_indices: Optional[torch.Tensor] = None,
                 edge_embeddings: Optional[torch.Tensor] = None,
                 need_weights: bool = False, mems: Optional[torch.tensor] = None,
-                asserts=True) -> TransformerLayerOutput:
+                asserts=True, languages: Optional[torch.Tensor] = None) -> TransformerLayerOutput:
         """
         Forward step of the code transformer layer.
 
@@ -157,11 +200,30 @@ class CodeTransformerLayer(TransformerEncoderLayer):
                 if attention_mask_query is not None:
                     assert attention_mask_query.shape == (seq_len, seq_len, bsz)
 
-        k_content_stream = F.linear(content_stream_cat, self.self_attn.get_k_proj_weight(),
-                                    self.self_attn.get_k_proj_bias())
-        v_content_stream = F.linear(content_stream_cat, self.self_attn.get_v_proj_weight(),
-                                    self.self_attn.get_v_proj_bias())
-        q_content_stream = F.linear(src, self.self_attn.get_q_proj_weight(), self.self_attn.get_q_proj_bias())
+        if self.rank1:
+            # Ignore bias for now.
+            alpha = torch.index_select(self.alpha, 0, languages).unsqueeze(0)
+            gamma = torch.index_select(self.gamma, 0, languages).unsqueeze(0)
+            perturb_content_stream_cat = content_stream_cat * alpha
+            perturb_src = src * alpha
+            k_content_stream = F.linear(
+                perturb_content_stream_cat, self.self_attn.get_k_proj_weight(),
+                self.self_attn.get_k_proj_bias())
+            v_content_stream = F.linear(
+                perturb_content_stream_cat, self.self_attn.get_v_proj_weight(),
+                self.self_attn.get_v_proj_bias())
+            q_content_stream = F.linear(
+                perturb_src, self.self_attn.get_q_proj_weight(),
+                self.self_attn.get_q_proj_bias())
+            k_content_stream *= gamma[:, :, :self.d_model]
+            v_content_stream *= gamma[:, :, self.d_model:2*self.d_model]
+            q_content_stream *= gamma[:, :, 2*self.d_model:]
+        else:
+            k_content_stream = F.linear(content_stream_cat, self.self_attn.get_k_proj_weight(),
+                                        self.self_attn.get_k_proj_bias())
+            v_content_stream = F.linear(content_stream_cat, self.self_attn.get_v_proj_weight(),
+                                        self.self_attn.get_v_proj_bias())
+            q_content_stream = F.linear(src, self.self_attn.get_q_proj_weight(), self.self_attn.get_q_proj_bias())
 
         k_position_encoding = None
         dist_ixs = None
@@ -197,7 +259,7 @@ class CodeTransformerLayer(TransformerEncoderLayer):
         if need_weights:
             att_out_content, att_probs_content = att_out_content
 
-        att_out_content = self.post_attention(src, att_out_content)
+        att_out_content = self.post_attention(src, att_out_content, languages)
 
         if query_stream is not None:  # query stream attention (if query stream is provided)
             q_query_stream = F.linear(query_stream, self.self_attn.get_q_proj_weight(),
@@ -236,7 +298,7 @@ class CodeTransformerLayer(TransformerEncoderLayer):
                 )
                 if need_weights:
                     att_out_query, att_probs_query = att_out_query
-            att_out_query = self.post_attention(query_stream, att_out_query)
+            att_out_query = self.post_attention(query_stream, att_out_query, languages)
         else:
             att_out_query = None
             att_probs_query = None
@@ -631,7 +693,8 @@ class CodeTransformer(TransformerEncoder):
                 edge_embeddings: Optional[Tuple[torch.Tensor]] = None,
                 target_mapping: Optional[torch.Tensor] = None,
                 need_weights: Optional[bool] = False,
-                need_all_embeddings: Optional[bool] = False) -> TransformerOutput:
+                need_all_embeddings: Optional[bool] = False,
+                languages: Optional[torch.Tensor] = None) -> TransformerOutput:
         """
         Forward pass of the Code Transformer.
 
@@ -728,7 +791,8 @@ class CodeTransformer(TransformerEncoder):
                           relative_distances=relative_distances, token_distances=encoded_token_distances,
                           target_mapping=target_mapping,
                           query_stream=query_stream_out, need_weights=need_weights,
-                          edge_embeddings=edge_embeddings, edge_indices=edge_indices
+                          edge_embeddings=edge_embeddings, edge_indices=edge_indices,
+                          languages=languages
                           )
             content_stream_out = outputs.content_stream_out
             query_stream_out = outputs.query_stream_out

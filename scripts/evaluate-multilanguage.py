@@ -33,9 +33,11 @@ parser.add_argument("snapshot_iteration", type=str)
 parser.add_argument("partition", type=str, choices=['train', 'valid', 'test'], default='valid')
 parser.add_argument('--no-gpu', action='store_true', default=False)
 parser.add_argument('--filter-language', default=None, const=None, nargs='?')
+parser.add_argument('--ckpt-path', type=str, default=None)
+parser.add_argument('--config', type=str, default=None)
 args = parser.parse_args()
 
-BATCH_SIZE = 4
+BATCH_SIZE = 16 
 LIMIT_TOKENS = 1000  # MAX_NUM_TOKENS
 
 
@@ -78,9 +80,9 @@ def print_results():
 
 
 if __name__ == '__main__':
-
+    print(args.config)
     if args.model == 'code_transformer':
-        model_manager = CodeTransformerModelManager()
+        model_manager = CodeTransformerModelManager(lightening=True, config_path=args.config)
     elif args.model == 'great':
         model_manager = GreatModelManager()
     elif args.model == 'xl_net':
@@ -96,7 +98,28 @@ if __name__ == '__main__':
                                          shuffle=False,
                                          filter_language=args.filter_language)
 
-    model = model_manager.load_model(args.run_id, args.snapshot_iteration, gpu=not args.no_gpu)
+    print('checkpoint path {}'.format(args.ckpt_path))
+    model = model_manager.load_model(
+        args.run_id, 
+        args.snapshot_iteration, 
+        gpu=not args.no_gpu, 
+        snapshot_path=args.ckpt_path,
+        #ignore_rank1=True,
+        #reset_encoder=True
+        )
+
+    #rank1_config = 'models/ct_code_summarization/CT-1/rank1_config.json'
+    #rank1_model_manager = CodeTransformerModelManager(lightening=True, config_path=rank1_config)
+    #rank1_model = rank1_model_manager.load_model(
+    #    args.run_id, 
+    #    args.snapshot_iteration, 
+    #    gpu=not args.no_gpu, 
+    #    snapshot_path=args.ckpt_path,
+    #    ignore_rank1=True
+    #    )
+
+    base_params = [(mm[0], mm[1]) for mm in model.named_parameters()]
+    #rank1_params = [(mm[0], mm[1]) for mm in rank1_model.named_parameters()]
 
     vocabularies = data_manager.load_vocabularies()
     if len(vocabularies) == 3:
@@ -186,6 +209,8 @@ if __name__ == '__main__':
     # Evaluate predictions
     print()
     print('==============')
+    print('checkpoint path {}'.format(args.ckpt_path))
+    print('config path {}'.format(args.config))
     print('Final results:')
     print('==============')
     print_results()

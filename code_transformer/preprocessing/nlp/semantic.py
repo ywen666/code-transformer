@@ -22,6 +22,7 @@ logger = get_logger(__file__)
 TEMP_PIPE = "/tmp/semantic-temp-pipe"
 SEMANTIC_CMD = [SEMANTIC_EXECUTABLE]
 if shutil.which(" ".join(SEMANTIC_CMD)) is None:
+    print(" ".join(SEMANTIC_CMD))
     assert shutil.which("semantic") is not None, f"Could not locate semantic executable in {SEMANTIC_CMD}! Is the path correct?"
     logger.warn(f"Could not locate semantic executable in {SEMANTIC_CMD}! Falling back to semantic executable found "
                 f"on PATH")
@@ -111,7 +112,7 @@ def semantic_parse(language, arg, output_type, process_identifier, *code_snippet
         if not os.path.exists(pipe_name):
             os.mkfifo(pipe_name)
 
-        # Write to pipe asynchroneously 
+        # Write to pipe asynchroneously
         threading.Thread(target=pipe_writer_worker, args=(code, pipe_name)).start()
 
     result = run_semantic_parse(arg, output_type, pipes_wildcard, quiet=quiet)

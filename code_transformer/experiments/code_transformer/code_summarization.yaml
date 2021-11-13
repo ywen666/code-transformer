@@ -1,5 +1,5 @@
 experiment_setup:
-  executable: 'code_transformer/experiments/code_transformer/code_summarization.py'
+  executable: 'code_transformer/experiments/code_transformer/code_summarization_lightening.py'
 
 data_setup:
   language: 'python,javascript,ruby,go' # The dataset (language) to use
@@ -49,7 +49,7 @@ model:
     input_nonlinearity: 'tanh'
     num_languages: None                   # only relevant for multi-language datasets. How many different languages have been fused together
     transformer:                          # CodeTransformer hyperparameters
-      num_layers: 1
+      num_layers: 3 
       encoder_layer:
         d_model: 1024                       # Internal embedding dimension
         nhead: 8                            # Number of attention heads
@@ -93,7 +93,7 @@ optimizer:
 
 training:
   random_seed: 456
-  batch_size: 8
+  batch_size: 8 
   simulated_batch_size: 128         # Gradient Accumulation. After how many samples the model parameters should be updated
   simulated_batch_size_valid: 1280  # Over how many samples validation metrics should be calculated
   accumulate_tokens_batch: False

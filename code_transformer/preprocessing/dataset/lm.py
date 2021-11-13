@@ -2,7 +2,7 @@ from typing import List
 
 import torch
 
-from code_transformer.modeling.constants import SEP_TOKEN, CLS_TOKEN, MAX_NUM_TOKENS
+from code_transformer.modeling.constants import PAD_TOKEN, EOS_TOKEN, MAX_NUM_TOKENS, UNKNOWN_TOKEN
 from code_transformer.modeling.data_utils import sample_targets, permutation_attention_mask
 from code_transformer.preprocessing.datamanager.base import CTBatch
 from code_transformer.preprocessing.datamanager.preprocessed import CTPreprocessedDataManager
@@ -106,6 +106,116 @@ class CTLanguageModelingDatasetNoPunctuation(CTLanguageModelingDataset):
         self.config = data_manager.load_config()
         self.min_sequence_length = min_sequence_length
         self.max_num_tokens_no_punctuation = max_num_tokens
+
+    def __next__(self):
+        sample = super(CTLanguageModelingDatasetNoPunctuation, self).__next__()
+
+        # Calculate indices of tokens that should be kept, i.e., are tokens like identifiers or types
+        decoded_tokens = decode_tokens(sample.tokens, word_vocab=self.word_vocab, config=self.config)
+        idx = get_idx_no_punctuation(decoded_tokens)
+
+        if len(idx) > self.max_num_tokens_no_punctuation + 1:
+            return self.__next__()
+
+        # For the distance matrices, token sequence, token and node types, only indices corresponding to non punctuation
+        # tokens are kept
+        distance_matrices_no_punctuation = []
+        for dist_matrix in sample.distance_matrices:
+            distance_matrices_no_punctuation.append(dist_matrix[idx][:, idx])
+        node_types_no_punctuation = sample.node_types[idx]
+        token_types_no_punctuation = sample.token_types[idx]
+        tokens_no_punctuation = sample.tokens[idx]
+
+        if len(tokens_no_punctuation) < self.num_labels_per_sample \
+                or len(tokens_no_punctuation) < self.min_sequence_length:
+            return next(self)
+
+        pointer_pad_mask = sample.pointer_pad_mask
+        extended_vocabulary_ids = sample.extended_vocabulary_ids
+        if self.use_pointer_network:
+            # Also remove punctuation tokens from extended_vocabulary_ids and pointer_pad_mask
+            idx_sub_tokens = []
+            current_sub_token = 0
+            for i, mask in enumerate(sample.pointer_pad_mask):
+                n_sub_tokens = mask.sum()
+                if i in idx:
+                    idx_sub_tokens.extend(range(current_sub_token, current_sub_token + n_sub_tokens))
+
+                current_sub_token += n_sub_tokens
+
+            pointer_pad_mask = sample.pointer_pad_mask[idx]
+            extended_vocabulary_ids = [sample.extended_vocabulary_ids[i] for i in idx_sub_tokens]
+
+            assert pointer_pad_mask.sum() == len(extended_vocabulary_ids), \
+                f"Number of non-masked subtokens ({pointer_pad_mask.sum().item()}) does not match number of extended vocabulary ids ({len(extended_vocabulary_ids)})"
+
+        return CTBaseSample(tokens_no_punctuation, token_types_no_punctuation, node_types_no_punctuation,
+                            distance_matrices_no_punctuation, sample.binning_vectors, sample.distance_names,
+                            sample.func_name, sample.docstring, sample.extended_vocabulary,
+                            extended_vocabulary_ids, pointer_pad_mask, sample.language)
+
+
+class Mydataset(torch.utils.data.Dataset):
+    """
+    Filters each sample to remove punctuation tokens like .,(): etc. as well as [INDENT]/[DEDENT] tokens.
+    The idea is that for the code summarization task, these tokens are hardly important but instead elongate the token
+    sequence unnecessarily.
+    """
+
+    def __init__(self, data_manager: CTPreprocessedDataManager, token_distances=None, max_distance_mask=None,
+                 num_sub_tokens=5, use_token_types=True, use_pointer_network=False, max_num_tokens=MAX_NUM_TOKENS,
+                 num_labels_per_sample=5, min_sequence_length=5):
+        self.data_manager = data_manager
+        vocabularies = self.data_manager.load_vocabularies()
+        if len(vocabularies) == 3:
+            self.word_vocab, self.token_type_vocab, self.node_type_vocab = vocabularies
+        else:
+            self.word_vocab, self.token_type_vocab, self.node_type_vocab, self.word_vocab_labels = vocabularies
+        self.token_distances = token_distances
+        self.max_distance_mask = max_distance_mask
+        self.sub_token_pad_value = self.word_vocab.vocabulary[PAD_TOKEN]
+        self.sequence_pad_value = self.word_vocab.vocabulary[EOS_TOKEN]
+        self.unk_id = self.word_vocab.vocabulary[UNKNOWN_TOKEN]
+        self.token_type_pad_value = self.token_type_vocab.vocabulary[EOS_TOKEN]
+        self.node_type_pad_value = self.node_type_vocab.vocabulary[EOS_TOKEN]
+        self.num_sub_tokens = num_sub_tokens
+        self.use_token_types = use_token_types
+        self.use_pointer_network = use_pointer_network
+        self.max_num_tokens = max_num_tokens
+
+        self.config = data_manager.load_config()
+        self.min_sequence_length = min_sequence_length
+        self.max_num_tokens_no_punctuation = max_num_tokens
+
+        import glob
+        from code_transformer.utils.io import save_zipped, load_zipped, save_json, load_json
+
+        self.files = glob.glob(f"{data_manager.dataset_location}/dataset-*.p.gzip")
+        self.curr_files = 0 
+        data = load_zipped(self.files[0])
+        import pdb; pdb.set_trace()
+
+    def __next__(self):
+        sample = self._get_next_sample()
+        return self.transform_sample(sample)
+
+    def _get_next_sample(self):
+        sample = next(self.dataset)
+
+        if self.max_num_tokens is not None:
+            if len(sample.tokens) > self.max_num_tokens:
+                print(
+                    f"Snippet has {len(sample.tokens)} tokens exceeding the limit of {self.max_num_tokens}")
+                del sample
+                return self._get_next_sample()
+
+        sorted_mappings = sorted(sample.token_mapping.items(), key=lambda x: x[0])
+        sample.token_mapping = [m[1] for m in sorted_mappings]
+
+        return sample
+    
+    def __getitem__(self, idex):
+        return
 
     def __next__(self):
         sample = super(CTLanguageModelingDatasetNoPunctuation, self).__next__()

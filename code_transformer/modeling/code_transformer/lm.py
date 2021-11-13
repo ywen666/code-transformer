@@ -71,9 +71,10 @@ class TransformerLMEncoder(nn.Module):
     def _reset_parameters(self):
         r"""Initiate parameters in the transformer model."""
 
-        for p in self.parameters():
+        for name, p in self.named_parameters():
             if p.dim() > 1:
-                xavier_uniform_(p)
+                if not 'alpha' in name and not 'gamma' in name:
+                    xavier_uniform_(p)
 
     def forward(self, input_tokens: torch.Tensor, input_node_types: torch.Tensor,
                 relative_distances: List[Tuple[torch.Tensor]],
@@ -133,6 +134,7 @@ class TransformerLMEncoder(nn.Module):
             emb_cat = torch.cat((token_embeddings, node_embeddings.unsqueeze(2)), dim=-2).reshape([bsz, seq_len, -1])
         token_embeddings = self.token_linear(emb_cat)
 
+        language_tensor = languages.clone()
         if self.language_embedding is not None:
             languages = languages.unsqueeze(-1)  # [B, 1]
             languages = self.language_embedding(languages)
@@ -148,7 +150,8 @@ class TransformerLMEncoder(nn.Module):
                                                       src_mask=attention_mask,
                                                       src_key_padding_mask=pad_mask,
                                                       relative_distances=relative_distances,
-                                                      need_all_embeddings=need_all_embeddings)
+                                                      need_all_embeddings=need_all_embeddings,
+                                                      languages=language_tensor)
         return transformer_output
 
     def forward_batch(self, batch: CTBatch, need_weights=False, need_all_embeddings=False) -> \
@@ -187,9 +190,10 @@ class TransformerLanguageModel(nn.Module):
     def _reset_parameters(self):
         r"""Initiate parameters in the transformer model."""
 
-        for p in self.parameters():
+        for name, p in self.named_parameters():
             if p.dim() > 1:
-                xavier_uniform_(p)
+                if not 'alpha' in name and not 'gamma' in name:
+                    xavier_uniform_(p)
 
     def forward(self, input_tokens: torch.Tensor, input_node_types: torch.Tensor,
                 relative_distances: List[Tuple[torch.Tensor]],

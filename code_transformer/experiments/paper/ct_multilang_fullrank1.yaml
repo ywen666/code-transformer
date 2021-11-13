@@ -56,7 +56,7 @@ model:
         use_pos_content: True
         use_pos_pos: True
         use_token_distances: True
-        rank1: False 
+        rank1: True 
   lm_decoder:
     output_nonlinearity: None
     n_layers: 1
@@ -70,6 +70,8 @@ model:
     use_pointer_query_self_attention: False
     concat_query_and_pointer: True
     attend_cls_token: False
+    rank1: True 
+    pointer_rank1: False 
 
 optimizer:
   optimizer: 'Adam'

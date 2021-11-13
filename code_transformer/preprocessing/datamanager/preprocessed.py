@@ -4,6 +4,7 @@ from copy import copy, deepcopy
 from math import floor, ceil
 from typing import List, Tuple
 
+import torch
 import numpy as np
 
 from code_transformer.preprocessing.pipeline.stage2 import CTStage2MultiLanguageSample
@@ -160,8 +161,19 @@ class CTPreprocessedDataManager(DataManager):
                 dataset_slice_size = config['execution']['save_every']
             else:
                 dataset_slice_size = 5000
+
         files = glob.glob(f"{self.dataset_location}/dataset-*.p.gzip")
-        return (len(files) - 1) * dataset_slice_size + int(dataset_slice_size / 2)
+        if torch.distributed.is_available() and torch.distributed.is_initialized() and self.partition == 'train':
+            group = torch.distributed.group.WORLD
+            rank = torch.distributed.get_rank(group=group)
+            num_workers = torch.distributed.get_world_size(group=group)
+            logger("calculate len: group {}; rank {}; size {}".format(group, rank, num_workers))
+
+            sub_size = len(files) // num_workers
+            files = files[:int(sub_size * num_workers)]
+            files = files[rank::num_workers] 
+        return len(files) * dataset_slice_size
+        #return (len(files) - 1) * dataset_slice_size + int(dataset_slice_size / 2)
 
     def _lazy_load_files(self):
         """
@@ -172,6 +184,16 @@ class CTPreprocessedDataManager(DataManager):
         # once would not fit into the main memory.
         files = glob.glob(
             f"{self.dataset_location}/dataset-{'*' if self.load_single_file is None else self.load_single_file}.p.gzip")
+
+        if torch.distributed.is_available() and torch.distributed.is_initialized() and self.partition == 'train':
+            group = torch.distributed.group.WORLD
+            rank = torch.distributed.get_rank(group=group)
+            num_workers = torch.distributed.get_world_size(group=group)
+
+            sub_size = len(files) // num_workers
+            files = files[:int(sub_size * num_workers)]
+            files = files[rank::num_workers] 
+            logger.info("Total # workers {}, worker {} Splitting files into {}".format(num_workers, rank, len(files)))
 
         # Converts the file list into a generator
         if self.shuffle and not self.mini_dataset:
@@ -257,7 +279,7 @@ class CTBufferedDataManager(CTPreprocessedDataManager, BufferedDataManager):
     """
 
     def __init__(self, data_location: str, language: str, partition="train", shuffle=False, sort_by_length=False,
-                 size_load_buffer=5000,
+                 size_load_buffer=5,
                  size_save_buffer=1, infinite_loading=False, mini_dataset=False, chunk_size=None,
                  filter_language: str = None, dataset_imbalance: Tuple = None):
         CTPreprocessedDataManager.__init__(self, data_location, language, partition, shuffle, infinite_loading,

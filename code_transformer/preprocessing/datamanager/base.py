@@ -93,7 +93,7 @@ class BufferedDataManager(DataManager):
 
     QUEUE_END_MSG = 'DONE'  # A special message that is used for internal queues to signalize that the producer thread is done
 
-    def __init__(self, data_manager: DataManager, size_load_buffer=5000, size_save_buffer=1):
+    def __init__(self, data_manager: DataManager, size_load_buffer=100, size_save_buffer=1):
         """
         :param data_manager: can be an arbitrary data manager that supports iterating over samples and saving dataset files
         :param size_load_buffer: specifies how many SAMPLES will be prefetched from data_manager
@@ -113,8 +113,8 @@ class BufferedDataManager(DataManager):
         is created. To avoid spawning multiple workers, one can only have one iterator at a time.
         """
 
-        if self.load_worker is not None:
-            raise Exception("There is already an iterator running!")
+        #if self.load_worker is not None:
+        #    raise Exception("There is already an iterator running!")
         self.load_worker = self.LoadWorker(self.data_manager, self.load_buffer, self.stop_event)
         self.load_worker.start()
         return self

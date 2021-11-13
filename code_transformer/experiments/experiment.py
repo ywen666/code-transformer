@@ -19,9 +19,10 @@ from code_transformer.modeling.modelmanager.code_transformer import CodeTransfor
     CodeTransformerLMModelManager
 from code_transformer.preprocessing.datamanager.base import batch_filter_distances, batch_to_device, \
     DataLoaderWrapper, BufferedDataManager
-from code_transformer.preprocessing.datamanager.preprocessed import CTBufferedDataManager
+from code_transformer.preprocessing.datamanager.preprocessed import CTBufferedDataManager, \
+    CTPreprocessedDataManager
 from code_transformer.preprocessing.dataset.lm import CTLanguageModelingDataset, \
-    CTLanguageModelingDatasetNoPunctuation
+    CTLanguageModelingDatasetNoPunctuation, Mydataset
 from code_transformer.preprocessing.graph.binning import ExponentialBinning, EqualBinning
 from code_transformer.preprocessing.graph.distances import DistanceBinning
 from code_transformer.preprocessing.graph.transform import MaxDistanceMaskTransform, TokenDistancesTransform
@@ -67,7 +68,7 @@ class ExperimentSetup:
                    chunk_size=None, filter_language=None, dataset_imbalance=None, num_sub_tokens=NUM_SUB_TOKENS):
         self.data_manager = CTBufferedDataManager(DATA_PATH_STAGE_2, language, shuffle=shuffle,
                                                   infinite_loading=True,
-                                                  mini_dataset=mini_dataset, size_load_buffer=10000,
+                                                  mini_dataset=mini_dataset, size_load_buffer=10,
                                                   sort_by_length=sort_by_length, chunk_size=chunk_size,
                                                   filter_language=filter_language, dataset_imbalance=dataset_imbalance)
         self.word_vocab, self.token_type_vocab, self.node_type_vocab = self.data_manager.load_vocabularies()
@@ -100,7 +101,7 @@ class ExperimentSetup:
         if self.use_validation:
             data_manager_validation = CTBufferedDataManager(DATA_PATH_STAGE_2, language, partition="valid",
                                                             shuffle=True, infinite_loading=True,
-                                                            mini_dataset=mini_dataset, size_load_buffer=10000,
+                                                            mini_dataset=mini_dataset, size_load_buffer=10,
                                                             filter_language=filter_language,
                                                             dataset_imbalance=dataset_imbalance)
             if use_no_punctuation:
@@ -134,7 +135,7 @@ class ExperimentSetup:
                                    dataset_imbalance, num_sub_tokens):
         data_manager_validation = CTBufferedDataManager(data_location, language, partition="valid",
                                                         shuffle=True, infinite_loading=infinite_loading,
-                                                        size_load_buffer=10000, filter_language=filter_language,
+                                                        size_load_buffer=10, filter_language=filter_language,
                                                         dataset_imbalance=dataset_imbalance)
         if use_no_punctuation:
             return CTLanguageModelingDatasetNoPunctuation(data_manager_validation,
@@ -228,18 +229,39 @@ class ExperimentSetup:
         self.model_manager = None
 
     @ex.capture(prefix="optimizer")
-    def _init_optimizer(self, learning_rate, reg_scale, scheduler=None, scheduler_params=None, optimizer="Adam"):
+    def _init_optimizer(
+        self, 
+        learning_rate,
+        reg_scale, 
+        scheduler=None, 
+        scheduler_params=None, 
+        optimizer="Adam",
+        warmup_steps=1000):
         if optimizer == 'Adam':
             self.optimizer = optim.Adam(self.model_lm.parameters(), lr=learning_rate, weight_decay=reg_scale)
         elif optimizer == 'Momentum':
             self.optimizer = optim.SGD(self.model_lm.parameters(), lr=learning_rate, weight_decay=reg_scale,
                                        momentum=0.95, nesterov=True)
+        elif optimizer == 'AdamW':
+            no_decay = ['bias', 'LayerNorm.weight']
+            optimizer_grouped_parameters = [
+                {'params': [p for n, p in self.model_lm.named_parameters() if not any(nd in n for nd in no_decay)],
+                'weight_decay': reg_scale},
+                {'params': [p for n, p in self.model_lm.named_parameters() if any(nd in n for nd in no_decay)], 'weight_decay': 0.0}
+            ]
+            self.optimizer = optim.AdamW(
+                optimizer_grouped_parameters,
+                lr=learning_rate
+            )
+            from transformers import get_constant_schedule_with_warmup
+            self.scheduler = get_constant_schedule_with_warmup(self.optimizer, num_warmup_steps=warmup_steps)
 
-        self.scheduler = None
-        if scheduler == 'OneCycleLR':
-            self.scheduler = optim.lr_scheduler.OneCycleLR(self.optimizer, **scheduler_params)
-        elif scheduler == 'MultiStepLR':
-            self.scheduler = optim.lr_scheduler.MultiStepLR(self.optimizer, **scheduler_params)
+        if optimizer != 'AdamW':
+            self.scheduler = None
+            if scheduler == 'OneCycleLR':
+                self.scheduler = optim.lr_scheduler.OneCycleLR(self.optimizer, **scheduler_params)
+            elif scheduler == 'MultiStepLR':
+                self.scheduler = optim.lr_scheduler.MultiStepLR(self.optimizer, **scheduler_params)
 
     def _init_metrics(self, metrics):
         self.metrics = dict()
